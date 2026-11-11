@@ -1,0 +1,58 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: npm }
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test -w widget
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env: { POSTGRES_USER: ccai, POSTGRES_PASSWORD: testing-only, POSTGRES_DB: ccai_test }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ccai -d ccai_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      rabbit:
+        image: rabbitmq:4.1-alpine
+        env: { RABBITMQ_DEFAULT_USER: ccai, RABBITMQ_DEFAULT_PASS: testing-only }
+        ports: ['5672:5672']
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: pip install -c backend/requirements.lock -e 'backend[test]'
+      - run: pytest backend/tests -q
+      - run: pytest backend/tests -q
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://ccai:testing-only@localhost:5432/ccai_test
+          TEST_BROKER_URL: amqp://ccai:testing-only@localhost:5672//
+      - run: python scripts/configure.py
+      - run: docker compose config --quiet
+      - run: docker compose build
+      - run: docker compose up -d --wait
+      - run: python scripts/smoke.py
+        env:
+          SMOKE_STATE_PATH: /tmp/ccai-smoke-state.json
+      - name: Exercise backup and restore on a fresh disposable installation
+        run: |
+          sh scripts/backup.sh /tmp/ccai-backup
+          docker compose down -v
+          mv .env /tmp/ccai-before-restore.env
+          sh scripts/restore.sh /tmp/ccai-backup
+          docker compose up -d --wait
+          python scripts/verify_restore.py /tmp/ccai-smoke-state.json
+      - if: failure()
+        run: docker compose logs --tail=100
+      - if: always()
+        run: docker compose down -v

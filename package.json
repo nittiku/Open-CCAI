@@ -1,0 +1,19 @@
+{
+  "name": "open-ccai",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "widget"
+  ],
+  "scripts": {
+    "dev": "node scripts/demo.mjs",
+    "build": "npm run build -w frontend && npm run build -w widget",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm run test -w widget",
+    "dev:frontend": "npm run dev -w frontend"
+  },
+  "devDependencies": {
+    "prettier": "^3.10.0"
+  }
+}

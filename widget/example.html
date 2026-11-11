@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Open-CCAI widget example</title>
+    <link rel="stylesheet" href="example.css" />
+    <script src="example.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <span class="eyebrow">OPEN-CCAI / WEBSITE EXAMPLE</span>
+      <h1>Support, right where<br />your customers are.</h1>
+      <p>
+        This is a separate website using your published Open-CCAI bot.<br />Allow this page's origin
+        in your bot settings before connecting.
+      </p>
+      <form>
+        <label
+          >Platform origin<input
+            name="api"
+            type="url"
+            value="http://localhost:5173"
+            required /></label
+        ><label>Published bot ID<input name="bot" required placeholder="Paste your bot ID" /></label
+        ><button>Connect chat widget</button>
+      </form>
+      <small id="result">The launcher will appear in the bottom-right corner.</small>
+    </main>
+  </body>
+</html>

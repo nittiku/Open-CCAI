@@ -1,0 +1,59 @@
+body {
+  font: 14px system-ui;
+  background: #f3f6ed;
+  color: #2f573e;
+  margin: 0;
+  padding: 12vh 8vw;
+}
+main {
+  max-width: 650px;
+}
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: #7d9770;
+}
+h1 {
+  font-size: 44px;
+  line-height: 1.15;
+  letter-spacing: -2px;
+  margin: 25px 0;
+}
+p {
+  font-size: 13px;
+  line-height: 1.9;
+  color: #899e7c;
+}
+form {
+  max-width: 440px;
+  margin: 30px 0;
+}
+label {
+  display: block;
+  font-size: 11px;
+  margin: 17px 0;
+  color: #708a63;
+}
+input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid #d7e2ca;
+  border-radius: 6px;
+  padding: 11px;
+  margin-top: 6px;
+  background: white;
+  color: #456838;
+}
+button {
+  background: #24634f;
+  color: white;
+  border: 0;
+  padding: 12px 17px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+small {
+  font-size: 11px;
+  color: #99ad8b;
+}

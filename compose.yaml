@@ -1,0 +1,95 @@
+name: open-ccai
+x-app: &app
+  build: ./backend
+  image: open-ccai-backend:local
+  environment: &environment
+    DATABASE_URL: postgresql+psycopg://ccai:${POSTGRES_PASSWORD:?Run scripts/configure.py}@db:5432/ccai
+    BROKER_URL: amqp://${RABBITMQ_USER:-ccai}:${RABBITMQ_PASSWORD:?Run scripts/configure.py}@rabbit:5672//
+    APP_SECRET: ${APP_SECRET:?Run scripts/configure.py}
+    ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Run scripts/configure.py}
+    SETUP_TOKEN: ${SETUP_TOKEN:?Run scripts/configure.py}
+    APP_ORIGINS: ${APP_ORIGINS:-http://localhost:8080}
+    SECURE_COOKIE: ${SECURE_COOKIE:-true}
+    STORAGE_PATH: /data/uploads
+    TOOL_ALLOWED_HOSTS: ${TOOL_ALLOWED_HOSTS:-}
+    PROVIDER_ALLOWED_HOSTS: ${PROVIDER_ALLOWED_HOSTS:-api.openai.com,api.anthropic.com,generativelanguage.googleapis.com}
+    LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+    DO_NOT_TRACK: '1'
+  volumes:
+    - uploads:/data/uploads
+  init: true
+  restart: unless-stopped
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: ccai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/configure.py}
+      POSTGRES_DB: ccai
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U ccai -d ccai']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  rabbit:
+    image: rabbitmq:4.1-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-ccai}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Run scripts/configure.py}
+    volumes:
+      - rabbit:/var/lib/rabbitmq
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  migrate:
+    <<: *app
+    command: [alembic, upgrade, head]
+    restart: 'no'
+    depends_on:
+      db: { condition: service_healthy }
+  api:
+    <<: *app
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test:
+        [
+          CMD,
+          python,
+          -c,
+          'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/api/v1/health")',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  worker:
+    <<: *app
+    command: [celery, -A, app.worker.celery, worker, --loglevel=WARNING, --concurrency=2]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      rabbit: { condition: service_healthy }
+  scheduler:
+    <<: *app
+    command: [celery, -A, app.worker.celery, beat, --loglevel=WARNING, --schedule=/tmp/ccai-beat]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      rabbit: { condition: service_healthy }
+  console:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - '127.0.0.1:${PORT:-8080}:80'
+    depends_on:
+      api: { condition: service_healthy }
+    restart: unless-stopped
+volumes:
+  postgres:
+  rabbit:
+  uploads:
