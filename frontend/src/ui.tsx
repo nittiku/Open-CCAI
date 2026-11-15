@@ -65,7 +65,7 @@ export function Empty({
       </div>
       <h3>{title}</h3>
       <p>{text}</p>
-      {children}
+      {children && <div className="empty-actions">{children}</div>}
     </div>
   );
 }

@@ -22,6 +22,8 @@ import {
   Bot as BotIcon,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CircleHelp,
   Code2,
   GitBranch,
@@ -47,6 +49,7 @@ import {
 } from 'lucide-react';
 import {
   api,
+  del,
   post,
   put,
   download,
@@ -73,6 +76,7 @@ import { AgentStudio } from './AgentStudio';
 
 type Page =
   'projects' | 'agents' | 'tools' | 'builder' | 'knowledge' | 'inbox' | 'connections' | 'team';
+type WorkspaceMode = 'development' | 'human-agent';
 const icons = {
   message: MessageCircle,
   input: CircleHelp,
@@ -217,14 +221,122 @@ function Auth({ done }: { done: (u: User) => void }) {
   );
 }
 
+function ProjectSwitcher({
+  projects,
+  projectId,
+  onSelect,
+  onCreateProject,
+}: {
+  projects: Project[];
+  projectId: string;
+  onSelect: (id: string) => void;
+  onCreateProject: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const current = projects.find((p) => p.id === projectId) || projects[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as globalThis.Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className={`workspace-switch-wrap ${open ? 'open' : ''}`} ref={ref}>
+      <button
+        type="button"
+        className="workspace-switch interactive"
+        aria-label="Current project"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <div>
+          <strong>{current ? current.name : 'No projects'}</strong>
+          <small>Development workspace</small>
+        </div>
+        <ChevronDown size={15} className="workspace-chevron" />
+      </button>
+      {open && (
+        <div className="workspace-menu" role="listbox" aria-label="Projects">
+          <div className="workspace-menu-label">Projects</div>
+          {projects.length ? (
+            projects.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                role="option"
+                aria-selected={current?.id === p.id}
+                className={current?.id === p.id ? 'active' : ''}
+                onClick={() => {
+                  onSelect(p.id);
+                  setOpen(false);
+                }}
+              >
+                <span className="workspace-menu-badge">{p.name[0].toUpperCase()}</span>
+                <span className="workspace-menu-name">{p.name}</span>
+                {current?.id === p.id && <Check size={14} />}
+              </button>
+            ))
+          ) : (
+            <button
+              type="button"
+              className="workspace-menu-create"
+              onClick={() => {
+                setOpen(false);
+                onCreateProject();
+              }}
+            >
+              <Plus size={14} />
+              <span>Create new project</span>
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [user, setUser] = useState<User | null>();
+  const [workspace, setWorkspace] = useState<WorkspaceMode>('development');
   const [page, setPage] = useState<Page>('projects');
+  const [lastDevPage, setLastDevPage] = useState<Page>('projects');
   const [toast, setToast] = useState<{ message: string; error: boolean }>();
   const [botId, setBotId] = useState('');
   const [projectId, setProjectId] = useState('');
   const [creating, setCreating] = useState(false);
+  const [creatingProject, setCreatingProject] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('openccai.sidebarCollapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleSidebar = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('openccai.sidebarCollapsed', next ? '1' : '0');
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
+  }, []);
   const notice = useCallback<Notice>((message, error = false) => setToast({ message, error }), []);
   useEffect(() => {
     api<User>('/auth/me')
@@ -257,7 +369,9 @@ function App() {
   const project = projects?.find((p) => p.id === projectId);
   const projectBots = (bots || []).filter((b) => b.project_id === projectId);
   useEffect(() => {
-    if (projects && projectId && !projects.some((p) => p.id === projectId)) setProjectId('');
+    if (projects && (!projectId || !projects.some((p) => p.id === projectId))) {
+      setProjectId(projects[0]?.id || '');
+    }
   }, [projects, projectId]);
   const [providers, refreshProviders] = useLoad<Provider[]>(
     () => (canBuild ? api('/providers') : Promise.resolve([])),
@@ -273,9 +387,38 @@ function App() {
     const available = (bots || []).filter((b) => b.project_id === projectId);
     if (!available.some((b) => b.id === botId)) setBotId(available[0]?.id || '');
   }, [bots, botId, projectId]);
+  const selectPage = useCallback((next: Page) => {
+    setPage(next);
+    if (next === 'inbox') {
+      setWorkspace('human-agent');
+    } else {
+      setWorkspace('development');
+      setLastDevPage(next);
+    }
+  }, []);
+  const switchWorkspace = useCallback(
+    (next: WorkspaceMode) => {
+      if (next === workspace) return;
+      if (next === 'human-agent' && canOperate) {
+        setWorkspace('human-agent');
+        setPage('inbox');
+      } else if (next === 'development' && canBuild) {
+        setWorkspace('development');
+        setPage(lastDevPage);
+      }
+    },
+    [workspace, canOperate, canBuild, lastDevPage],
+  );
   useEffect(() => {
-    if (user && !canBuild && page === 'projects') setPage('inbox');
-  }, [user, canBuild, page]);
+    if (!user) return;
+    if (!canBuild && canOperate) {
+      setWorkspace('human-agent');
+      setPage('inbox');
+    } else if (canBuild && !canOperate && workspace === 'human-agent') {
+      setWorkspace('development');
+      setPage(lastDevPage);
+    }
+  }, [user, canBuild, canOperate, workspace, lastDevPage]);
   if (user === undefined)
     return (
       <div className="loading">
@@ -287,26 +430,66 @@ function App() {
   const titles = {
     projects: 'Projects & orchestration',
     agents: 'Agent builder',
-    tools: 'Shared tools',
+    tools: 'Tools',
     builder: 'Flow studio',
     knowledge: 'Knowledge',
     inbox: 'Agent inbox',
     connections: 'Connections',
     team: 'Team & access',
   };
-  const nav: { id: Page; label: string; icon: typeof Layers; show: boolean }[] = [
-    { id: 'projects', label: 'Projects', icon: GitBranch, show: canBuild },
-    { id: 'agents', label: 'Agent builder', icon: BotIcon, show: canBuild },
-    { id: 'tools', label: 'Shared tools', icon: Code2, show: canBuild },
-    { id: 'builder', label: 'Flow studio', icon: Workflow, show: canBuild },
-    { id: 'knowledge', label: 'Knowledge', icon: BookOpen, show: canBuild },
-    { id: 'inbox', label: 'Agent inbox', icon: Inbox, show: canOperate },
-    { id: 'connections', label: 'Connections', icon: KeyRound, show: canBuild },
-    { id: 'team', label: 'Team & access', icon: Users, show: user.role === 'administrator' },
+  const nav: {
+    id: Page;
+    label: string;
+    icon: typeof Layers;
+    show: boolean;
+    workspace: WorkspaceMode;
+  }[] = [
+    { id: 'projects', label: 'Projects', icon: GitBranch, show: canBuild, workspace: 'development' },
+    {
+      id: 'agents',
+      label: 'Agent builder',
+      icon: BotIcon,
+      show: canBuild,
+      workspace: 'development',
+    },
+    { id: 'tools', label: 'Tools', icon: Code2, show: canBuild, workspace: 'development' },
+    {
+      id: 'builder',
+      label: 'Flow studio',
+      icon: Workflow,
+      show: canBuild,
+      workspace: 'development',
+    },
+    { id: 'knowledge', label: 'Knowledge', icon: BookOpen, show: canBuild, workspace: 'development' },
+    { id: 'inbox', label: 'Agent inbox', icon: Inbox, show: canOperate, workspace: 'human-agent' },
+    {
+      id: 'connections',
+      label: 'Connections',
+      icon: KeyRound,
+      show: canBuild,
+      workspace: 'development',
+    },
+    {
+      id: 'team',
+      label: 'Team & access',
+      icon: Users,
+      show: user.role === 'administrator',
+      workspace: 'development',
+    },
   ];
   return (
-    <div className="shell">
+    <div className={`shell ${collapsed ? 'collapsed' : ''}`}>
       <aside className="sidebar">
+        <button
+          type="button"
+          className="sidebar-toggle"
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!collapsed}
+          onClick={toggleSidebar}
+        >
+          {collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
+        </button>
         <a className="brand" href="/" onClick={(e) => e.preventDefault()}>
           <div className="brand-symbol">
             <Workflow size={23} />
@@ -314,38 +497,46 @@ function App() {
           open<span>ccai</span>
           <span className="version">α</span>
         </a>
-        <div className="workspace-switch">
-          <span className="workspace-letter">W</span>
-          <div>
-            {canBuild && projects?.length ? (
-              <select
-                aria-label="Current project"
-                value={projectId}
-                onChange={(e) => setProjectId(e.target.value)}
-              >
-                <option value="">Select a project</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <strong>Your workspace</strong>
-            )}
-            <small>{canBuild ? 'Project workspace' : 'Self-hosted installation'}</small>
+        {workspace === 'development' ? (
+          canBuild ? (
+            <ProjectSwitcher
+              projects={projects || []}
+              projectId={projectId}
+              onSelect={setProjectId}
+              onCreateProject={() => {
+                selectPage('projects');
+                setCreatingProject(true);
+              }}
+            />
+          ) : (
+            <div className="workspace-switch">
+              <div>
+                <strong>Development</strong>
+                <small>Development workspace</small>
+              </div>
+            </div>
+          )
+        ) : (
+          <div className="workspace-switch">
+            <div>
+              <strong>Human agent</strong>
+              <small>Live inbox &amp; handoffs</small>
+            </div>
           </div>
-          <ChevronDown size={15} />
+        )}
+        <div className="nav-label">
+          {workspace === 'development' ? 'DEVELOPMENT' : 'HUMAN AGENT'}
         </div>
-        <div className="nav-label">WORKSPACE</div>
         <nav>
           {nav
-            .filter((n) => n.show)
+            .filter((n) => n.show && n.workspace === workspace)
             .map((n) => (
               <button
                 className={page === n.id ? 'active' : ''}
                 key={n.id}
-                onClick={() => setPage(n.id)}
+                aria-label={n.label}
+                title={collapsed ? n.label : undefined}
+                onClick={() => selectPage(n.id)}
               >
                 <n.icon size={18} />
                 {n.label}
@@ -354,19 +545,10 @@ function App() {
             ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="ownership">
-            <Shield size={18} />
-            <div>
-              <strong>Open by design</strong>
-              <p>
-                Your keys. Your data.
-                <br />
-                Your deployment.
-              </p>
-            </div>
-          </div>
           <div className="user-menu">
-            <div className="avatar">{user.email[0].toUpperCase()}</div>
+            <div className="avatar" title={user.email}>
+              {user.email[0].toUpperCase()}
+            </div>
             <div>
               <strong title={user.email}>{user.email}</strong>
               <small>{human(user.role)}</small>
@@ -378,7 +560,9 @@ function App() {
                 post('/auth/logout')
                   .then(() => {
                     setUser(null);
+                    setWorkspace('development');
                     setPage('projects');
+                    setLastDevPage('projects');
                     setProjectId('');
                     setBotId('');
                   })
@@ -392,8 +576,33 @@ function App() {
       </aside>
       <div className="main-shell">
         <header className="topbar">
-          <div>
-            <span className="muted">Workspace</span>
+          <div className="topbar-left">
+            <div className="workspace-tabs" role="tablist" aria-label="Workspace">
+              {canBuild && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={workspace === 'development'}
+                  className={workspace === 'development' ? 'active' : ''}
+                  onClick={() => switchWorkspace('development')}
+                >
+                  <Code2 size={14} />
+                  Development
+                </button>
+              )}
+              {canOperate && (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={workspace === 'human-agent'}
+                  className={workspace === 'human-agent' ? 'active' : ''}
+                  onClick={() => switchWorkspace('human-agent')}
+                >
+                  <Headphones size={14} />
+                  Human agent
+                </button>
+              )}
+            </div>
             <span className="slash">/</span>
             <strong>{titles[page]}</strong>
           </div>
@@ -421,22 +630,29 @@ function App() {
               newFlow={() => setCreating(true)}
               openFlow={(id) => {
                 setBotId(id);
-                setPage('builder');
+                selectPage('builder');
               }}
-              openAgents={() => setPage('agents')}
+              openAgents={() => selectPage('agents')}
+              createRequested={creatingProject}
+              onCreateHandled={() => setCreatingProject(false)}
+              onDeleted={async () => {
+                await Promise.all([refreshBots(), refreshAgents(), refreshProviders()]);
+              }}
             />
           )}
           {page === 'agents' && (
             <AgentStudio
               project={project}
               projects={projects || []}
-              agents={(agents || []).filter((a) => !projectId || a.project_id === projectId)}
+              agents={(agents || []).filter(
+                (a) => !projectId || !a.project_id || a.project_id === projectId,
+              )}
               providers={providers || []}
               flows={bots || []}
               refresh={refreshAgents}
               notice={notice}
-              openProjects={() => setPage('projects')}
-              openTools={() => setPage('tools')}
+              openProjects={() => selectPage('projects')}
+              openTools={() => selectPage('tools')}
             />
           )}
           {page === 'tools' && (
@@ -525,7 +741,7 @@ function App() {
             await refreshProjects();
             if (b.project_id) setProjectId(b.project_id);
             setBotId(b.id);
-            setPage('builder');
+            selectPage('builder');
             setImporting(false);
           }}
         />
@@ -554,7 +770,7 @@ function App() {
                 await refreshProjects();
                 if (b.project_id) setProjectId(b.project_id);
                 setBotId(b.id);
-                setPage('builder');
+                selectPage('builder');
                 setCreating(false);
                 notice('Intent created in the selected project');
               } catch (err) {
@@ -1342,11 +1558,7 @@ function Knowledge({
   return (
     <>
       <div className="page-heading">
-        <div>
-          <span className="eyebrow">GROUNDED IN YOUR KNOWLEDGE</span>
-          <h1>A source of better answers.</h1>
-          <p>Give your bots the context they need, with references you can trace.</p>
-        </div>
+        <h1>Knowledge</h1>
         <button
           className="primary"
           disabled={!bots.length || !providers.some((p) => p.purpose === 'embedding')}
@@ -1639,11 +1851,7 @@ function AgentInbox({
   return (
     <>
       <div className="page-heading">
-        <div>
-          <span className="eyebrow">THE HUMAN SIDE OF AUTOMATION</span>
-          <h1>Make the connection.</h1>
-          <p>Pick up where your bot left off, with the whole conversation in view.</p>
-        </div>
+        <h1>Agent inbox</h1>
         <button
           className={user.available ? 'availability available' : 'availability'}
           onClick={() =>
@@ -1948,20 +2156,11 @@ function Connections({
   const [kind, setKind] = useState('openai');
   const [purpose, setPurpose] = useState('generation');
   const [busy, setBusy] = useState(false);
+  const [deletingTool, setDeletingTool] = useState<Tool>();
   return (
     <>
       <div className="page-heading">
-        <div>
-          <span className="eyebrow">
-            {toolsOnly ? 'SHARED COMPONENTS' : 'BRING YOUR OWN PROVIDERS'}
-          </span>
-          <h1>{toolsOnly ? 'One tool library. Every agent.' : 'Your models. Your choice.'}</h1>
-          <p>
-            {toolsOnly
-              ? 'Register tools once and enable them for full agents, Mini agents, or flow steps.'
-              : 'Connect model APIs and business tools. Keep your workflows portable.'}
-          </p>
-        </div>
+        <h1>{toolsOnly ? 'Tools' : 'Connections'}</h1>
         {admin && (
           <button className="primary" onClick={() => setAdding(true)}>
             <Plus size={16} />
@@ -2065,7 +2264,20 @@ function Connections({
             <div className="bot-grid">
               {tools.map((t) => (
                 <div className="tool-card" key={t.id}>
-                  <Code2 size={22} />
+                  <div className="tool-card-head">
+                    <Code2 size={22} />
+                    {admin && (
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={`Delete ${t.name}`}
+                        title="Delete tool"
+                        onClick={() => setDeletingTool(t)}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    )}
+                  </div>
                   <h3>{t.name}</h3>
                   <p>{t.description || 'External HTTP tool'}</p>
                   <Badge>Schema validated</Badge>
@@ -2085,6 +2297,45 @@ function Connections({
             : 'API keys are encrypted on your server. Model usage is billed directly by your provider. Capability settings must match your selected model.'}
         </span>
       </div>
+      {deletingTool && (
+        <Modal title="Delete tool" close={() => !busy && setDeletingTool(undefined)}>
+          <p className="muted">
+            Delete <strong>{deletingTool.name}</strong>? Agents using this tool will have it
+            detached.
+          </p>
+          <div className="toolbar-actions">
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => setDeletingTool(undefined)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await del(`/tools/${deletingTool.id}`);
+                  setDeletingTool(undefined);
+                  await reloadTools();
+                  notice('Tool deleted');
+                } catch (e) {
+                  notice((e as Error).message, true);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              <Trash2 size={15} />
+              Delete tool
+            </button>
+          </div>
+        </Modal>
+      )}
       {adding && (
         <Modal
           title={tab === 'models' ? 'Connect a model' : 'Register HTTP tool'}
@@ -2405,11 +2656,7 @@ function Team({
   return (
     <>
       <div className="page-heading">
-        <div>
-          <span className="eyebrow">BETTER TOGETHER</span>
-          <h1>A place for your whole team.</h1>
-          <p>Give people the access they need to build, support, and supervise.</p>
-        </div>
+        <h1>Team &amp; access</h1>
         <button
           className="primary"
           onClick={() => {

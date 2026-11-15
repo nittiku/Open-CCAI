@@ -9,9 +9,11 @@ import {
   MessageCircle,
   ArrowRight,
   Code2,
+  Trash2,
 } from 'lucide-react';
 import {
   api,
+  del,
   post,
   put,
   type Project,
@@ -48,6 +50,9 @@ export function ProjectWorkspace({
   newFlow,
   openFlow,
   openAgents,
+  createRequested,
+  onCreateHandled,
+  onDeleted,
 }: {
   projects: Project[];
   projectId: string;
@@ -61,8 +66,18 @@ export function ProjectWorkspace({
   newFlow: () => void;
   openFlow: (id: string) => void;
   openAgents: () => void;
+  createRequested?: boolean;
+  onCreateHandled?: () => void;
+  onDeleted?: () => Promise<unknown>;
 }) {
   const [creating, setCreating] = useState(false);
+  const [template, setTemplate] = useState<'blank' | 'support' | 'orders'>('blank');
+  useEffect(() => {
+    if (createRequested) {
+      setCreating(true);
+      onCreateHandled?.();
+    }
+  }, [createRequested, onCreateHandled]);
   const [expanded, setExpanded] = useState('');
   useEffect(() => {
     if (expanded && expanded !== projectId) setExpanded('');
@@ -72,14 +87,7 @@ export function ProjectWorkspace({
   return (
     <>
       <div className="page-heading">
-        <div>
-          <span className="eyebrow">ONE PROJECT. ONE ORCHESTRATOR.</span>
-          <h1>Give every request a direction.</h1>
-          <p>
-            Describe your project, enable intents and agents, and let your orchestrator route the
-            conversation.
-          </p>
-        </div>
+        <h1>Projects</h1>
         <button className="primary" onClick={() => setCreating(true)}>
           <Plus size={16} />
           New project
@@ -132,26 +140,41 @@ export function ProjectWorkspace({
             newFlow={newFlow}
             openFlow={openFlow}
             openAgents={openAgents}
+            onDeleted={onDeleted}
           />
         ) : null}
       </div>
       {creating && (
-        <Modal title="Create a project" close={() => setCreating(false)}>
+        <Modal
+          title="Create a project"
+          close={() => {
+            setCreating(false);
+            setTemplate('blank');
+          }}
+        >
           <form
             onSubmit={async (e) => {
               e.preventDefault();
               const f = new FormData(e.currentTarget);
               try {
                 const description = String(f.get('description'));
-                await post<Project>('/projects', {
+                const created = await post<Project>('/projects', {
                   name: f.get('name'),
                   description,
+                  template,
                   orchestrator: { ...emptyOrchestrator, description },
                 });
                 await refresh();
-                setExpanded('');
+                if (template !== 'blank') await onDeleted?.();
+                select(created.id);
+                setExpanded(created.id);
                 setCreating(false);
-                notice('Project created. Add intents or agents, then configure its orchestrator.');
+                setTemplate('blank');
+                notice(
+                  template === 'blank'
+                    ? 'Project created. Add intents or agents, then configure its orchestrator.'
+                    : 'Project created from template with sample tools, agent, and flows.',
+                );
               } catch (err) {
                 notice((err as Error).message, true);
               }
@@ -159,6 +182,37 @@ export function ProjectWorkspace({
           >
             <Field label="Project name">
               <input name="name" required maxLength={120} />
+            </Field>
+            <Field label="Template">
+              <div className="template-grid" role="radiogroup" aria-label="Project template">
+                {(
+                  [
+                    ['blank', 'Blank project', 'Empty project with no starter resources.'],
+                    [
+                      'support',
+                      'Customer support',
+                      '2 dummy tools, 1 support agent, and 2 sample flows.',
+                    ],
+                    [
+                      'orders',
+                      'Orders & returns',
+                      '2 dummy tools, 1 orders agent, and 2 sample flows.',
+                    ],
+                  ] as const
+                ).map(([id, label, hint]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="radio"
+                    aria-checked={template === id}
+                    className={`template-card ${template === id ? 'active' : ''}`}
+                    onClick={() => setTemplate(id)}
+                  >
+                    <strong>{label}</strong>
+                    <small>{hint}</small>
+                  </button>
+                ))}
+              </div>
             </Field>
             <Field label="Description">
               <textarea
@@ -186,6 +240,7 @@ function ProjectEditor({
   newFlow,
   openFlow,
   openAgents,
+  onDeleted,
 }: {
   project: Project;
   flows: Flow[];
@@ -197,12 +252,16 @@ function ProjectEditor({
   newFlow: () => void;
   openFlow: (id: string) => void;
   openAgents: () => void;
+  onDeleted?: () => Promise<unknown>;
 }) {
   const [draft, setDraft] = useState({
     ...project,
     orchestrator: { ...emptyOrchestrator, ...project.orchestrator },
   });
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [keepAgents, setKeepAgents] = useState(false);
+  const [keepTools, setKeepTools] = useState(false);
   const [test, setTest] = useState<TestSession>();
   const cfg = draft.orchestrator;
   const set = (key: keyof Orchestrator, value: unknown) =>
@@ -252,6 +311,20 @@ function ProjectEditor({
         }
         actions={
           <div className="toolbar-actions">
+            <button
+              className="secondary compact"
+              disabled={busy}
+              onClick={() => {
+                setKeepAgents(false);
+                setKeepTools(false);
+                setConfirmDelete(true);
+              }}
+              aria-label="Delete project"
+              title="Delete project"
+            >
+              <Trash2 size={15} />
+              Delete
+            </button>
             <button className="secondary compact" disabled={busy} onClick={() => action('save')}>
               <Save size={15} />
               Save
@@ -478,6 +551,74 @@ function ProjectEditor({
           close={() => setTest(undefined)}
           notice={notice}
         />
+      )}
+      {confirmDelete && (
+        <Modal title="Delete project" close={() => !busy && setConfirmDelete(false)}>
+          <p className="muted">
+            Delete <strong>{project.name}</strong>? Intents and flows in this project will be
+            deleted by default.
+          </p>
+          <div className="delete-options">
+            <label className="delete-option">
+              <input
+                type="checkbox"
+                checked={keepAgents}
+                disabled={busy}
+                onChange={(e) => setKeepAgents(e.target.checked)}
+              />
+              <div>
+                <strong>Keep agents</strong>
+                <small>Preserve agents from this project instead of deleting them.</small>
+              </div>
+            </label>
+            <label className="delete-option">
+              <input
+                type="checkbox"
+                checked={keepTools}
+                disabled={busy}
+                onChange={(e) => setKeepTools(e.target.checked)}
+              />
+              <div>
+                <strong>Keep tools</strong>
+                <small>Preserve tools used by this project.</small>
+              </div>
+            </label>
+          </div>
+          <div className="toolbar-actions">
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => setConfirmDelete(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await del(
+                    `/projects/${project.id}?keep_agents=${keepAgents}&keep_tools=${keepTools}`,
+                  );
+                  setConfirmDelete(false);
+                  await refresh();
+                  await onDeleted?.();
+                  notice('Project deleted');
+                } catch (e) {
+                  notice((e as Error).message, true);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              <Trash2 size={15} />
+              Delete project
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   );

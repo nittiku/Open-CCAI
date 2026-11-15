@@ -91,7 +91,9 @@ class ProjectVersion(Record, Base):
 
 class Agent(Record, Base):
     __tablename__ = "agents"
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
+    project_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.id"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(120))
     description: Mapped[str] = mapped_column(Text, default="")
     purpose: Mapped[str] = mapped_column(Text, default="")

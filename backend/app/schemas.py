@@ -115,6 +115,7 @@ class ProjectIn(Named):
     purpose: str = Field(default="", max_length=5000)
     origins: list[str] = Field(default_factory=list, max_length=30)
     orchestrator: OrchestratorIn = Field(default_factory=OrchestratorIn)
+    template: Literal["blank", "support", "orders"] = "blank"
 
 
 class AgentDefinition(BaseModel):

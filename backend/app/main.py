@@ -582,6 +582,20 @@ def create_tool(body: ToolIn, user=Depends(admins), db: DB = Depends(session)):
     return tool_view(t)
 
 
+@app.delete("/api/v1/tools/{tid}")
+def delete_tool(tid: str, user=Depends(admins), db: DB = Depends(session)):
+    t = get(db, Tool, tid)
+    db.execute(delete(Invocation).where(Invocation.tool_id == tid))
+    for a in db.scalars(select(Agent)):
+        draft = a.draft or {}
+        tool_ids = draft.get("tool_ids") or []
+        if tid in tool_ids:
+            a.draft = {**draft, "tool_ids": [x for x in tool_ids if x != tid]}
+    db.delete(t)
+    db.commit()
+    return {"deleted": tid}
+
+
 @app.get("/api/v1/collections")
 def collections(user=Depends(builders), db: DB = Depends(session)):
     return [

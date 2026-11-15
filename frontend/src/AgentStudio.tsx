@@ -1,7 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Bot, Plus, Save, Rocket, MessageCircle, Code2, BookOpen, ArrowRight } from 'lucide-react';
+import {
+  Bot,
+  Plus,
+  Save,
+  Rocket,
+  MessageCircle,
+  Code2,
+  BookOpen,
+  ArrowRight,
+  Trash2,
+} from 'lucide-react';
 import {
   api,
+  del,
   post,
   put,
   type Project,
@@ -56,16 +67,7 @@ export function AgentStudio({
   return (
     <>
       <div className="page-heading">
-        <div>
-          <span className="eyebrow">
-            {project ? `REUSABLE AGENTS FOR ${project.name.toUpperCase()}` : 'REUSABLE AGENTS'}
-          </span>
-          <h1>Build agents with a purpose.</h1>
-          <p>
-            Give each agent a role, connect shared tools and knowledge, and publish a reusable
-            version.
-          </p>
-        </div>
+        <h1>Agents</h1>
         <button
           className="primary"
           onClick={() => (projects.length ? setCreating(true) : openProjects())}
@@ -102,7 +104,11 @@ export function AgentStudio({
                 <strong>{a.name}</strong>
                 <small>
                   {!project &&
-                    `${projects.find((p) => p.id === a.project_id)?.name || 'Project'} · `}
+                    `${
+                      a.project_id
+                        ? projects.find((p) => p.id === a.project_id)?.name || 'Project'
+                        : 'Unassigned'
+                    } · `}
                   {a.published_id ? 'Published' : 'Draft'}
                 </small>
               </div>
@@ -205,6 +211,7 @@ function AgentEditor({
   const [draft, setDraft] = useState(agent);
   const [definition, setDefinition] = useState({ ...initial, ...agent.draft });
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [test, setTest] = useState<TestSession>();
   const set = (key: keyof AgentDefinition, value: unknown) =>
     setDefinition((d) => ({ ...d, [key]: value }));
@@ -260,6 +267,16 @@ function AgentEditor({
         }
         actions={
           <div className="toolbar-actions">
+            <button
+              className="secondary compact"
+              disabled={busy}
+              onClick={() => setConfirmDelete(true)}
+              aria-label="Delete agent"
+              title="Delete agent"
+            >
+              <Trash2 size={15} />
+              Delete
+            </button>
             <button className="secondary compact" disabled={busy} onClick={() => action('save')}>
               <Save size={15} />
               Save
@@ -372,10 +389,10 @@ function AgentEditor({
         </div>
       </ConfigSection>
       <ConfigSection
-        label="Shared tools"
+        label="Tools"
         title={
           <>
-            <Code2 size={18} /> Shared tools
+            <Code2 size={18} /> Tools
           </>
         }
         description={
@@ -448,6 +465,44 @@ function AgentEditor({
           close={() => setTest(undefined)}
           notice={notice}
         />
+      )}
+      {confirmDelete && (
+        <Modal title="Delete agent" close={() => !busy && setConfirmDelete(false)}>
+          <p className="muted">
+            Delete <strong>{agent.name}</strong>? This removes the agent and its published versions.
+          </p>
+          <div className="toolbar-actions">
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => setConfirmDelete(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await del(`/agents/${agent.id}`);
+                  setConfirmDelete(false);
+                  await refresh();
+                  notice('Agent deleted');
+                } catch (e) {
+                  notice((e as Error).message, true);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              <Trash2 size={15} />
+              Delete agent
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   );

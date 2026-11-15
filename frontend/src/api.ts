@@ -87,6 +87,7 @@ export const post = <T = unknown>(path: string, body?: unknown) =>
   api<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
 export const put = <T = unknown>(path: string, body: unknown) =>
   api<T>(path, { method: 'PUT', body: JSON.stringify(body) });
+export const del = <T = unknown>(path: string) => api<T>(path, { method: 'DELETE' });
 export function download(name: string, value: unknown) {
   const url = URL.createObjectURL(
     new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }),
