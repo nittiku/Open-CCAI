@@ -611,6 +611,24 @@ function outputBranches(kind: string) {
   if (['end', 'handoff'].includes(kind)) return [];
   return ['ai', 'agent', 'knowledge', 'tool'].includes(kind) ? ['next', 'error'] : ['next'];
 }
+function normalizeVerticalFlow(flow: Flow): Flow {
+  if (
+    flow.nodes.length > 1 &&
+    flow.nodes.every((n) => n.position.y === flow.nodes[0].position.y) &&
+    flow.nodes.some((n) => n.position.x !== flow.nodes[0].position.x)
+  ) {
+    const sorted = [...flow.nodes].sort((a, b) => a.position.x - b.position.x);
+    const rank = new Map(sorted.map((n, i) => [n.id, i]));
+    return {
+      ...flow,
+      nodes: flow.nodes.map((n) => ({
+        ...n,
+        position: { x: 200, y: 60 + (rank.get(n.id) ?? 0) * 160 },
+      })),
+    };
+  }
+  return flow;
+}
 function WorkflowNode({ data, selected }: NodeProps<CanvasNode>) {
   const Icon = icons[data.kind as keyof typeof icons] || Code2;
   const branches = outputBranches(data.kind);
@@ -629,7 +647,7 @@ function WorkflowNode({ data, selected }: NodeProps<CanvasNode>) {
   );
   return (
     <div className={`flow-node ${selected ? 'selected' : ''} kind-${data.kind}`}>
-      <Handle type="target" position={Position.Left} />
+      <Handle type="target" position={Position.Top} />
       <div className="flow-node-title">
         <span className="node-icon">
           <Icon size={16} />
@@ -638,18 +656,30 @@ function WorkflowNode({ data, selected }: NodeProps<CanvasNode>) {
         {data.entry && <span className="entry-tag">START</span>}
       </div>
       <div className="flow-node-body">{preview.slice(0, 100)}</div>
-      {branches.map((b, i) => (
-        <Handle
-          key={b}
-          id={b}
-          type="source"
-          position={Position.Right}
-          style={{
-            top: branches.length > 1 ? `${60 + i * 26}%` : '65%',
-            background: b === 'error' ? '#b76757' : '#407d70',
-          }}
-        />
-      ))}
+      {branches.map((b, i) => {
+        const left = branches.length > 1 ? `${34 + i * 32}%` : '50%';
+        return (
+          <React.Fragment key={b}>
+            {branches.length > 1 && (
+              <span
+                className={`port-label ${b === 'error' ? 'port-error' : ''}`}
+                style={{ left }}
+              >
+                {b}
+              </span>
+            )}
+            <Handle
+              id={b}
+              type="source"
+              position={Position.Bottom}
+              style={{
+                left,
+                background: b === 'error' ? '#b76757' : '#407d70',
+              }}
+            />
+          </React.Fragment>
+        );
+      })}
     </div>
   );
 }
@@ -676,7 +706,7 @@ function Builder({
   importFlow: () => void;
 }) {
   const [measured, setMeasured] = useState<Record<string, { width: number; height: number }>>({});
-  const [flow, setFlow] = useState<Flow>(bot.draft);
+  const [flow, setFlow] = useState<Flow>(() => normalizeVerticalFlow(bot.draft));
   const [selected, setSelected] = useState(flow.entry);
   const [dirty, setDirty] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -791,6 +821,11 @@ function Builder({
       handoff: { queue_id: queues[0]?.id },
       end: {},
     };
+    const anchorX =
+      node?.position.x ?? flow.nodes[flow.nodes.length - 1]?.position.x ?? 200;
+    const maxY = flow.nodes.length
+      ? Math.max(...flow.nodes.map((n) => n.position.y))
+      : -100;
     update({
       ...flow,
       nodes: [
@@ -800,8 +835,8 @@ function Builder({
           type: kind,
           config: configs[kind],
           position: {
-            x: 100 + (flow.nodes.length % 3) * 280,
-            y: 240 + Math.floor(flow.nodes.length / 3) * 170,
+            x: anchorX,
+            y: maxY + 160,
           },
         },
       ],

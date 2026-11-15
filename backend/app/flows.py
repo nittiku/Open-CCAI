@@ -26,19 +26,19 @@ def default_flow(queue_id=None):
             {
                 "id": "welcome",
                 "type": "message",
-                "position": {"x": 60, "y": 80},
+                "position": {"x": 200, "y": 60},
                 "config": {"text": "Hello! How can we help?"},
             },
             {
                 "id": "question",
                 "type": "input",
-                "position": {"x": 340, "y": 80},
+                "position": {"x": 200, "y": 220},
                 "config": {"variable": "question"},
             },
             {
                 "id": "transfer",
                 "type": "handoff",
-                "position": {"x": 620, "y": 80},
+                "position": {"x": 200, "y": 380},
                 "config": {"queue_id": queue_id},
             },
         ],
