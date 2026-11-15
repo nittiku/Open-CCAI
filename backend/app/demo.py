@@ -180,7 +180,7 @@ def seed_demo(db):
             {
                 "id": "answer",
                 "type": "ai",
-                "position": {"x": 80, "y": 100},
+                "position": {"x": 200, "y": 80},
                 "config": {
                     "provider_id": chat.id,
                     "instructions": "Explain the demo store returns and refund policy using the knowledge provided.",
@@ -192,7 +192,7 @@ def seed_demo(db):
             {
                 "id": "end",
                 "type": "end",
-                "position": {"x": 380, "y": 100},
+                "position": {"x": 200, "y": 240},
                 "config": {},
             },
         ],

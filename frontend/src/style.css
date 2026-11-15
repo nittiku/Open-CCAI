@@ -931,7 +931,7 @@ code,
 }
 .flow-node-body {
   font-size: 10px;
-  padding: 12px 32px 18px 14px;
+  padding: 12px 14px 22px 14px;
   color: #98a18c;
   line-height: 1.6;
   white-space: pre-wrap;
@@ -946,11 +946,13 @@ code,
 }
 .port-label {
   position: absolute;
-  right: 8px;
+  bottom: 6px;
   font-size: 7px;
   color: #9da890;
-  transform: translateY(-50%);
+  transform: translateX(-50%);
   background: #fff;
+  padding: 0 3px;
+  pointer-events: none;
 }
 .port-error {
   color: #b5897c;
