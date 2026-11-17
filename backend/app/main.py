@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+import io
 import json
 import secrets
 import time
@@ -664,6 +665,39 @@ async def upload(
         storage.delete(key)
         raise
     return {"id": d.id, "status": d.status}
+
+
+@app.get("/api/v1/documents/{did}")
+def get_document(did: str, user=Depends(builders), db=Depends(session)):
+    d = get(db, Document, did)
+    chunks = [
+        {"position": c.position, "text": c.text}
+        for c in db.scalars(
+            select(Chunk).where(Chunk.document_id == did).order_by(Chunk.position)
+        )
+    ]
+    content = ""
+    try:
+        raw = storage.read(d.storage_key)
+        if d.name.lower().endswith(".pdf"):
+            from pypdf import PdfReader
+
+            reader = PdfReader(io.BytesIO(raw))
+            content = "\n\n".join(page.extract_text() or "" for page in reader.pages)
+        else:
+            content = raw.decode("utf-8", errors="replace")
+    except Exception:
+        content = "\n\n".join(c["text"] for c in chunks)
+    return {
+        "id": d.id,
+        "collection_id": d.collection_id,
+        "name": d.name,
+        "status": d.status,
+        "error": d.error,
+        "created": d.created,
+        "content": content,
+        "chunks": chunks,
+    }
 
 
 @app.delete("/api/v1/documents/{did}")

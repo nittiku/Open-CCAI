@@ -15,7 +15,6 @@ import {
 } from '@xyflow/react';
 import {
   ArrowDownToLine,
-  ArrowLeft,
   ArrowRight,
   Upload,
   BookOpen,
@@ -26,6 +25,7 @@ import {
   ChevronRight,
   CircleHelp,
   Code2,
+  Eye,
   GitBranch,
   Headphones,
   Inbox,
@@ -58,14 +58,12 @@ import {
   type FullAgent,
   type User,
   type Flow,
-  type FlowNode,
   type Provider,
   type Tool,
   type Collection,
+  type DocumentDetail,
   type Queue,
   type Conversation,
-  type Message,
-  type Trace,
 } from './api';
 import '@xyflow/react/dist/style.css';
 import './style.css';
@@ -73,6 +71,7 @@ import { Badge, Field, Empty, Modal, useLoad, JsonField, type Notice } from './u
 import { Chat, TracePanel } from './conversation';
 import { ProjectWorkspace } from './ProjectWorkspace';
 import { AgentStudio } from './AgentStudio';
+import { AgenticStudio } from './AgenticStudio';
 
 type Page =
   'projects' | 'agents' | 'tools' | 'builder' | 'knowledge' | 'inbox' | 'connections' | 'team';
@@ -106,16 +105,43 @@ const ago = (t: number) => {
   const m = Math.floor((Date.now() / 1000 - t) / 60);
   return m < 1 ? 'Just now' : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`;
 };
+const DEMO_PROFILE = {
+  label: 'Demo Administrator',
+  email: 'demo@openccai.local',
+  password: 'OpenCCAI-Demo123!',
+  role: 'Administrator',
+};
+
 function Auth({ done }: { done: (u: User) => void }) {
   const [initialized, setInitialized] = useState<boolean>();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const invitation = new URLSearchParams(location.search).get('invitation');
+  const [email, setEmail] = useState(invitation ? '' : DEMO_PROFILE.email);
+  const [password, setPassword] = useState(invitation ? '' : DEMO_PROFILE.password);
   useEffect(() => {
     api<{ initialized: boolean }>('/auth/status')
       .then((s) => setInitialized(s.initialized))
       .catch((e) => setError(e.message));
   }, []);
+  async function signInWithProfile() {
+    setEmail(DEMO_PROFILE.email);
+    setPassword(DEMO_PROFILE.password);
+    setBusy(true);
+    setError('');
+    try {
+      const u = await post<User>('/auth/login', {
+        email: DEMO_PROFILE.email,
+        password: DEMO_PROFILE.password,
+      });
+      history.replaceState({}, '', '/');
+      done(u);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <div className="auth-screen">
       <div className="auth-story">
@@ -154,6 +180,25 @@ function Auth({ done }: { done: (u: User) => void }) {
             ? 'Create the first administrator for this installation.'
             : 'Sign in to your contact center workspace.'}
         </p>
+        {initialized && !invitation && (
+          <div className="saved-profiles">
+            <span className="saved-profiles-label">Saved profile</span>
+            <button
+              type="button"
+              className="saved-profile-card"
+              disabled={busy}
+              onClick={signInWithProfile}
+            >
+              <span className="workspace-letter">D</span>
+              <div className="saved-profile-info">
+                <strong>{DEMO_PROFILE.label}</strong>
+                <small>{DEMO_PROFILE.email}</small>
+              </div>
+              <Badge tone="light-green">{DEMO_PROFILE.role}</Badge>
+              <ArrowRight size={15} />
+            </button>
+          </div>
+        )}
         <form
           onSubmit={async (e) => {
             e.preventDefault();
@@ -180,6 +225,8 @@ function Auth({ done }: { done: (u: User) => void }) {
               type="email"
               autoComplete="username"
               required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               placeholder="you@organization.com"
             />
           </Field>
@@ -191,6 +238,8 @@ function Auth({ done }: { done: (u: User) => void }) {
               maxLength={256}
               autoComplete={initialized ? 'current-password' : 'new-password'}
               required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
             />
           </Field>
           {initialized === false && (
@@ -315,6 +364,8 @@ function App() {
   const [lastDevPage, setLastDevPage] = useState<Page>('projects');
   const [toast, setToast] = useState<{ message: string; error: boolean }>();
   const [botId, setBotId] = useState('');
+  const [agenticId, setAgenticId] = useState('');
+  const [studioSection, setStudioSection] = useState<'intents' | 'agentic'>('intents');
   const [projectId, setProjectId] = useState('');
   const [creating, setCreating] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
@@ -385,10 +436,17 @@ function App() {
   );
   useEffect(() => {
     const available = (bots || []).filter((b) => b.project_id === projectId);
-    if (!available.some((b) => b.id === botId)) setBotId(available[0]?.id || '');
+    if (botId && !available.some((b) => b.id === botId)) setBotId('');
   }, [bots, botId, projectId]);
+  useEffect(() => {
+    setAgenticId('');
+  }, [projectId]);
   const selectPage = useCallback((next: Page) => {
     setPage(next);
+    if (next === 'builder') {
+      setBotId('');
+      setAgenticId('');
+    }
     if (next === 'inbox') {
       setWorkspace('human-agent');
     } else {
@@ -615,7 +673,14 @@ function App() {
             <span className="small">v0.1.0</span>
           </div>
         </header>
-        <main className={page === 'builder' ? 'studio-main' : 'content'}>
+        <main
+          className={
+            page === 'builder' &&
+            ((studioSection === 'intents' && bot) || (studioSection === 'agentic' && agenticId))
+              ? 'studio-main'
+              : 'content'
+          }
+        >
           {page === 'projects' && (
             <ProjectWorkspace
               projects={projects || []}
@@ -629,8 +694,9 @@ function App() {
               notice={notice}
               newFlow={() => setCreating(true)}
               openFlow={(id) => {
-                setBotId(id);
                 selectPage('builder');
+                setStudioSection('intents');
+                setBotId(id);
               }}
               openAgents={() => selectPage('agents')}
               createRequested={creatingProject}
@@ -666,34 +732,118 @@ function App() {
             />
           )}
           {page === 'builder' &&
-            (bot ? (
-              <Builder
-                key={bot.id}
-                bot={bot}
-                bots={projectBots}
-                selectBot={setBotId}
-                providers={providers || []}
-                queues={queues || []}
-                refresh={refreshBots}
-                notice={notice}
-                create={() => setCreating(true)}
-                importFlow={() => setImporting(true)}
-              />
-            ) : (
-              <Empty
-                icon={Workflow}
-                title="Your first conversation starts here"
-                text="Create an intent, connect its steps, and enable it in your project orchestrator."
-              >
-                <button className="primary" onClick={() => setCreating(true)}>
-                  <Plus size={16} />
-                  Create intent
-                </button>
-                <button className="secondary" onClick={() => setImporting(true)}>
-                  <Upload size={15} /> Import flow
-                </button>
-              </Empty>
-            ))}
+            (() => {
+              const studioTabBar = (
+                <div
+                  className="workspace-tabs studio-subtabs"
+                  role="tablist"
+                  aria-label="Flow studio sections"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={studioSection === 'intents'}
+                    className={studioSection === 'intents' ? 'active' : ''}
+                    onClick={() => {
+                      setAgenticId('');
+                      setStudioSection('intents');
+                    }}
+                  >
+                    <Workflow size={14} />
+                    Intent flows
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={studioSection === 'agentic'}
+                    className={studioSection === 'agentic' ? 'active' : ''}
+                    onClick={() => {
+                      setBotId('');
+                      setStudioSection('agentic');
+                    }}
+                  >
+                    <GitBranch size={14} />
+                    Agentic workflows
+                  </button>
+                </div>
+              );
+              if (studioSection === 'agentic') {
+                return (
+                  <AgenticStudio
+                    projectId={projectId}
+                    activeId={agenticId}
+                    onSelectActive={setAgenticId}
+                    agents={(agents || []).filter(
+                      (a) => !projectId || !a.project_id || a.project_id === projectId,
+                    )}
+                    providers={providers || []}
+                    queues={queues || []}
+                    notice={notice}
+                    studioTabBar={studioTabBar}
+                  />
+                );
+              }
+              return bot ? (
+                <Builder
+                  key={bot.id}
+                  bot={bot}
+                  bots={projectBots}
+                  selectBot={setBotId}
+                  providers={providers || []}
+                  queues={queues || []}
+                  refresh={refreshBots}
+                  notice={notice}
+                  create={() => setCreating(true)}
+                  importFlow={() => setImporting(true)}
+                  studioTabBar={studioTabBar}
+                />
+              ) : (
+                <>
+                  <div className="page-heading">
+                    <div className="studio-heading-left">
+                      <h1>Flow studio</h1>
+                      {studioTabBar}
+                    </div>
+                    <div className="toolbar-actions">
+                      <button className="secondary" onClick={() => setImporting(true)}>
+                        <Upload size={15} /> Import flow
+                      </button>
+                      <button className="primary" onClick={() => setCreating(true)}>
+                        <Plus size={16} />
+                        New intent
+                      </button>
+                    </div>
+                  </div>
+                  <div className="project-layout list-only">
+                    <section className="panel project-list">
+                      <div className="section-head">
+                        <h2>
+                          Intent flows <span className="count">{projectBots.length}</span>
+                        </h2>
+                      </div>
+                      {!projectBots.length && (
+                        <Empty
+                          icon={Workflow}
+                          title="Your first conversation starts here"
+                          text="Create an intent, connect its steps, and enable it in your project orchestrator."
+                        />
+                      )}
+                      {projectBots.map((b) => (
+                        <button key={b.id} onClick={() => setBotId(b.id)}>
+                          <span className="bot-icon small-icon">
+                            <Workflow size={18} />
+                          </span>
+                          <div>
+                            <strong>{b.name}</strong>
+                            <small>{b.published_id ? 'Published flow' : 'Draft flow'}</small>
+                          </div>
+                        </button>
+                      ))}
+                    </section>
+                  </div>
+                </>
+              );
+            })()}
           {page === 'knowledge' && (
             <Knowledge bots={projectBots} providers={providers || []} notice={notice} />
           )}
@@ -740,8 +890,8 @@ function App() {
             await refreshBots();
             await refreshProjects();
             if (b.project_id) setProjectId(b.project_id);
-            setBotId(b.id);
             selectPage('builder');
+            setBotId(b.id);
             setImporting(false);
           }}
         />
@@ -769,8 +919,8 @@ function App() {
                 await refreshBots();
                 await refreshProjects();
                 if (b.project_id) setProjectId(b.project_id);
-                setBotId(b.id);
                 selectPage('builder');
+                setBotId(b.id);
                 setCreating(false);
                 notice('Intent created in the selected project');
               } catch (err) {
@@ -910,6 +1060,7 @@ function Builder({
   notice,
   create,
   importFlow,
+  studioTabBar,
 }: {
   bot: Bot;
   bots: Bot[];
@@ -920,6 +1071,7 @@ function Builder({
   notice: Notice;
   create: () => void;
   importFlow: () => void;
+  studioTabBar?: React.ReactNode;
 }) {
   const [measured, setMeasured] = useState<Record<string, { width: number; height: number }>>({});
   const [flow, setFlow] = useState<Flow>(() => normalizeVerticalFlow(bot.draft));
@@ -1072,6 +1224,17 @@ function Builder({
     <div className="studio">
       <div className="studio-toolbar">
         <div className="studio-title">
+          <button
+            className="icon-button"
+            aria-label="All intents"
+            title="All intents"
+            onClick={() => {
+              if (dirty && !confirm('Discard unsaved changes?')) return;
+              selectBot('');
+            }}
+          >
+            <ChevronLeft size={17} />
+          </button>
           <span className="bot-icon small-icon">
             <BotIcon size={19} />
           </span>
@@ -1102,6 +1265,7 @@ function Builder({
             <Plus size={16} />
           </button>
         </div>
+        {studioTabBar}
         <div className="toolbar-actions">
           <button className="secondary compact" onClick={importFlow}>
             <Upload size={15} /> Import flow
@@ -1143,18 +1307,20 @@ function Builder({
             <br />
             Connect the conversation.
           </p>
-          {Object.entries(labels).map(([kind, label]) => {
-            const Icon = icons[kind as keyof typeof icons];
-            return (
-              <button key={kind} onClick={() => add(kind)}>
-                <span className={`palette-icon kind-${kind}`}>
-                  <Icon size={17} />
-                </span>
-                <span>{label}</span>
-                <Plus size={13} />
-              </button>
-            );
-          })}
+          {Object.entries(labels)
+            .filter(([kind]) => kind !== 'agent')
+            .map(([kind, label]) => {
+              const Icon = icons[kind as keyof typeof icons];
+              return (
+                <button key={kind} onClick={() => add(kind)}>
+                  <span className={`palette-icon kind-${kind}`}>
+                    <Icon size={17} />
+                  </span>
+                  <span>{label}</span>
+                  <Plus size={13} />
+                </button>
+              );
+            })}
           <div className="palette-tip">
             <GitBranch size={18} />
             <p>Drag from a step’s output to another step’s input. Connect error branches too.</p>
@@ -1543,6 +1709,8 @@ function Knowledge({
   const [selected, setSelected] = useState('');
   const [creating, setCreating] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [viewing, setViewing] = useState<DocumentDetail>();
+  const [viewTab, setViewTab] = useState<'content' | 'chunks'>('content');
   const col = cols?.find((c) => c.id === selected);
   useEffect(() => {
     if (cols?.length && !cols.some((c) => c.id === selected)) setSelected(cols[0].id);
@@ -1679,21 +1847,42 @@ function Knowledge({
                         </td>
                         <td className="muted">{ago(d.created)}</td>
                         <td>
-                          <button
-                            className="icon-button danger"
-                            aria-label={`Delete ${d.name}`}
-                            onClick={async () => {
-                              if (!confirm(`Delete ${d.name} and its indexed content?`)) return;
-                              try {
-                                await api(`/documents/${d.id}`, { method: 'DELETE' });
-                                await reloadDocs();
-                              } catch (e) {
-                                notice((e as Error).message, true);
-                              }
-                            }}
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          <div className="document-actions">
+                            <button
+                              type="button"
+                              className="icon-button"
+                              aria-label={`View ${d.name}`}
+                              title={`View ${d.name}`}
+                              onClick={async () => {
+                                try {
+                                  const detail = await api<DocumentDetail>(`/documents/${d.id}`);
+                                  setViewTab('content');
+                                  setViewing(detail);
+                                } catch (e) {
+                                  notice((e as Error).message, true);
+                                }
+                              }}
+                            >
+                              <Eye size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-button danger"
+                              aria-label={`Delete ${d.name}`}
+                              title={`Delete ${d.name}`}
+                              onClick={async () => {
+                                if (!confirm(`Delete ${d.name} and its indexed content?`)) return;
+                                try {
+                                  await api(`/documents/${d.id}`, { method: 'DELETE' });
+                                  await reloadDocs();
+                                } catch (e) {
+                                  notice((e as Error).message, true);
+                                }
+                              }}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1795,6 +1984,56 @@ function Knowledge({
             </Field>
             <button className="primary wide">Create collection</button>
           </form>
+        </Modal>
+      )}
+      {viewing && (
+        <Modal title={viewing.name} close={() => setViewing(undefined)}>
+          <div className="kb-view-meta">
+            <Badge
+              tone={
+                viewing.status === 'ready' ? 'green' : viewing.status === 'error' ? 'red' : ''
+              }
+            >
+              {human(viewing.status)}
+            </Badge>
+            <span className="muted small">Uploaded {ago(viewing.created)}</span>
+            <span className="muted small">{viewing.chunks.length} indexed chunks</span>
+          </div>
+          <div className="page-tabs kb-tabs">
+            <button
+              type="button"
+              className={viewTab === 'content' ? 'active' : ''}
+              onClick={() => setViewTab('content')}
+            >
+              Document content
+            </button>
+            <button
+              type="button"
+              className={viewTab === 'chunks' ? 'active' : ''}
+              onClick={() => setViewTab('chunks')}
+            >
+              Indexed chunks <span>{viewing.chunks.length}</span>
+            </button>
+          </div>
+          {viewTab === 'content' ? (
+            <pre className="code-block kb-preview">
+              {viewing.content || 'No extractable text available.'}
+            </pre>
+          ) : viewing.chunks.length ? (
+            <div className="kb-chunks">
+              {viewing.chunks.map((c) => (
+                <div key={c.position} className="kb-chunk-card">
+                  <div className="kb-chunk-head">
+                    <strong>Chunk #{c.position + 1}</strong>
+                    <span className="muted small">{c.text.length} chars</span>
+                  </div>
+                  <pre className="code-block kb-preview">{c.text}</pre>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">No indexed chunks yet.</p>
+          )}
         </Modal>
       )}
     </>

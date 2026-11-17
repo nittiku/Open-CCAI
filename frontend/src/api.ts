@@ -34,6 +34,16 @@ export type Collection = {
   provider_id: string;
   generation: number;
 };
+export type DocumentDetail = {
+  id: string;
+  collection_id: string;
+  name: string;
+  status: string;
+  error: string | null;
+  created: number;
+  content: string;
+  chunks: { position: number; text: string }[];
+};
 export type Queue = { id: string; name: string };
 export type Message = {
   id: string;

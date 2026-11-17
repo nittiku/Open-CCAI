@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Bot as BotIcon, Send, Headphones, X } from 'lucide-react';
 import { api, type Message, type Trace } from './api';
 import { Badge, useLoad, type Notice } from './ui';

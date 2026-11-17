@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Bot,
   Plus,
@@ -7,6 +7,7 @@ import {
   MessageCircle,
   Code2,
   BookOpen,
+  Eye,
   ArrowRight,
   Trash2,
 } from 'lucide-react';
@@ -21,6 +22,7 @@ import {
   type Provider,
   type Tool,
   type Collection,
+  type DocumentDetail,
   type Bot as Flow,
   type TestSession,
 } from './api';
@@ -213,6 +215,10 @@ function AgentEditor({
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [test, setTest] = useState<TestSession>();
+  const [viewingCollection, setViewingCollection] = useState<{
+    collection: Collection;
+    documents: DocumentDetail[];
+  }>();
   const set = (key: keyof AgentDefinition, value: unknown) =>
     setDefinition((d) => ({ ...d, [key]: value }));
   const toggle = (key: 'tool_ids' | 'collection_ids', id: string) =>
@@ -438,9 +444,10 @@ function AgentEditor({
       >
         <div className="target-list">
           {collections.map((c) => (
-            <label className="target-row" key={c.id}>
+            <div className="target-row" key={c.id}>
               <input
                 type="checkbox"
+                aria-label={`Enable ${c.name}`}
                 checked={definition.collection_ids.includes(c.id)}
                 onChange={() => toggle('collection_ids', c.id)}
               />
@@ -449,7 +456,26 @@ function AgentEditor({
                 <strong>{c.name}</strong>
                 <p>Collection generation {c.generation}</p>
               </div>
-            </label>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={`View ${c.name}`}
+                title={`View ${c.name}`}
+                onClick={async () => {
+                  try {
+                    const list = await api<{ id: string }[]>(`/collections/${c.id}/documents`);
+                    const documents = await Promise.all(
+                      list.map((d) => api<DocumentDetail>(`/documents/${d.id}`)),
+                    );
+                    setViewingCollection({ collection: c, documents });
+                  } catch (e) {
+                    notice((e as Error).message, true);
+                  }
+                }}
+              >
+                <Eye size={16} />
+              </button>
+            </div>
           ))}
           {!collections.length && (
             <p className="pad muted">
@@ -458,6 +484,36 @@ function AgentEditor({
           )}
         </div>
       </ConfigSection>
+      {viewingCollection && (
+        <Modal
+          title={viewingCollection.collection.name}
+          close={() => setViewingCollection(undefined)}
+        >
+          {viewingCollection.documents.length ? (
+            <div className="kb-chunks">
+              {viewingCollection.documents.map((doc) => (
+                <div key={doc.id} className="kb-chunk-card">
+                  <div className="kb-chunk-head">
+                    <strong>{doc.name}</strong>
+                    <Badge
+                      tone={
+                        doc.status === 'ready' ? 'green' : doc.status === 'error' ? 'red' : ''
+                      }
+                    >
+                      {doc.status}
+                    </Badge>
+                  </div>
+                  <pre className="code-block kb-preview">
+                    {doc.content || 'No extractable text available.'}
+                  </pre>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">No documents uploaded to this collection yet.</p>
+          )}
+        </Modal>
+      )}
       {test && (
         <ConversationTest
           session={test}
