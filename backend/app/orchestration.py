@@ -20,7 +20,7 @@ from .db import Session
 from . import providers
 
 
-def validate_agent(db, project_id, definition):
+def validate_agent(db, project_id, definition, agent_id=None):
     errors = []
     provider = (
         db.get(Provider, definition.get("provider_id"))
@@ -34,12 +34,23 @@ def validate_agent(db, project_id, definition):
     for tid in definition.get("tool_ids", []):
         if not db.get(Tool, tid):
             errors.append("A selected shared tool no longer exists")
-    if (
+    needs_tools = bool(
         definition.get("tool_ids")
-        and provider
-        and not provider.capabilities.get("tools")
-    ):
+        or definition.get("sub_agent_ids")
+        or definition.get("delegate_agent_ids")
+    )
+    if needs_tools and provider and not provider.capabilities.get("tools"):
         errors.append("The selected model must support tool calling")
+    for field in ("sub_agent_ids", "delegate_agent_ids", "parallel_agent_ids"):
+        for target_id in dict.fromkeys(definition.get(field, []) or []):
+            if agent_id and target_id == agent_id:
+                errors.append("An agent cannot reference itself")
+                continue
+            target = db.get(Agent, target_id)
+            if not target or target.project_id != project_id or not target.published_id:
+                errors.append(
+                    f"Select published agents from this project for {field.replace('_', ' ')}"
+                )
     for cid in definition.get("collection_ids", []):
         col = db.get(Collection, cid)
         flow = db.get(Bot, col.bot_id) if col else None
@@ -55,12 +66,30 @@ def validate_agent(db, project_id, definition):
     return errors
 
 
+def pin_agent_definition(db, definition):
+    result = deepcopy(definition)
+    for field, dest in (
+        ("sub_agent_ids", "sub_agent_version_ids"),
+        ("delegate_agent_ids", "delegate_agent_version_ids"),
+        ("parallel_agent_ids", "parallel_agent_version_ids"),
+    ):
+        ids = list(dict.fromkeys(result.get(field, []) or []))
+        if ids:
+            result[dest] = {aid: db.get(Agent, aid).published_id for aid in ids}
+    return result
+
+
 def pin_flow_agents(db, flow):
     result = deepcopy(flow)
     for node in result["nodes"]:
         if node["type"] == "agent":
             agent = db.get(Agent, node["config"]["agent_id"])
             node["config"]["agent_version_id"] = agent.published_id
+        elif node["type"] == "fanout":
+            ids = list(dict.fromkeys(node["config"].get("agent_ids", []) or []))
+            node["config"]["agent_version_ids"] = {
+                aid: db.get(Agent, aid).published_id for aid in ids
+            }
     return result
 
 

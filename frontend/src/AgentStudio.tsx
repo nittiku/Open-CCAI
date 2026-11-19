@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Bot,
+  Bot as BotIcon,
   Plus,
   Save,
   Rocket,
@@ -34,6 +34,9 @@ const initial: AgentDefinition = {
   instructions: '',
   tool_ids: [],
   collection_ids: [],
+  sub_agent_ids: [],
+  delegate_agent_ids: [],
+  parallel_agent_ids: [],
   max_iterations: 8,
   output_schema: null,
 };
@@ -87,7 +90,7 @@ export function AgentStudio({
           </div>
           {!agents.length && (
             <Empty
-              icon={Bot}
+              icon={BotIcon}
               title="No agents yet"
               text="Create an agent, then select it to configure its instructions, tools, and knowledge."
             />
@@ -100,7 +103,7 @@ export function AgentStudio({
               onClick={() => setSelected(current?.id === a.id ? '' : a.id)}
             >
               <span className="bot-icon small-icon">
-                <Bot size={18} />
+                <BotIcon size={18} />
               </span>
               <div>
                 <strong>{a.name}</strong>
@@ -121,6 +124,7 @@ export function AgentStudio({
           <AgentEditor
             key={current.id}
             agent={current}
+            agents={agents}
             providers={providers}
             tools={tools || []}
             collections={(collections || []).filter((c) =>
@@ -195,6 +199,7 @@ export function AgentStudio({
 }
 function AgentEditor({
   agent,
+  agents,
   providers,
   tools,
   collections,
@@ -203,6 +208,7 @@ function AgentEditor({
   openTools,
 }: {
   agent: FullAgent;
+  agents: FullAgent[];
   providers: Provider[];
   tools: Tool[];
   collections: Collection[];
@@ -221,13 +227,18 @@ function AgentEditor({
   }>();
   const set = (key: keyof AgentDefinition, value: unknown) =>
     setDefinition((d) => ({ ...d, [key]: value }));
-  const toggle = (key: 'tool_ids' | 'collection_ids', id: string) =>
-    set(
-      key,
-      definition[key].includes(id)
-        ? definition[key].filter((x) => x !== id)
-        : [...definition[key], id],
-    );
+  const toggle = (
+    key:
+      | 'tool_ids'
+      | 'collection_ids'
+      | 'sub_agent_ids'
+      | 'delegate_agent_ids'
+      | 'parallel_agent_ids',
+    id: string,
+  ) => {
+    const current = definition[key] || [];
+    set(key, current.includes(id) ? current.filter((x) => x !== id) : [...current, id]);
+  };
   async function action(kind: 'save' | 'publish' | 'test') {
     setBusy(true);
     try {
@@ -432,6 +443,73 @@ function AgentEditor({
             </p>
           )}
         </div>
+      </ConfigSection>
+      <ConfigSection
+        label="Multi-agent composition (ADK)"
+        title={
+          <>
+            <BotIcon size={18} /> Agent handoff, delegation & fan-out
+          </>
+        }
+        description="Compose other published agents in this project using Google ADK sub_agents, AgentTool delegation, or ParallelAgent fan-out."
+      >
+        {(() => {
+          const peers = agents.filter(
+            (a) => a.project_id === agent.project_id && a.id !== agent.id && a.published_id,
+          );
+          if (!peers.length) {
+            return (
+              <p className="pad muted">
+                Publish another agent in this project to enable handoff, delegation, or fan-out.
+              </p>
+            );
+          }
+          const groups: Array<{
+            key: 'sub_agent_ids' | 'delegate_agent_ids' | 'parallel_agent_ids';
+            title: string;
+            hint: string;
+          }> = [
+            {
+              key: 'sub_agent_ids',
+              title: 'Handoff sub-agents (ADK transfer_to_agent)',
+              hint: 'Agent can transfer control to these specialists.',
+            },
+            {
+              key: 'delegate_agent_ids',
+              title: 'Delegate tools (ADK AgentTool)',
+              hint: 'Agent can call these specialists like tools and keep control.',
+            },
+            {
+              key: 'parallel_agent_ids',
+              title: 'Parallel fan-out (ADK ParallelAgent)',
+              hint: 'Run these specialists concurrently first, then synthesize with this agent.',
+            },
+          ];
+          return (
+            <div className="stack">
+              {groups.map((g) => (
+                <Field key={g.key} label={g.title} hint={g.hint}>
+                  <div className="target-list">
+                    {peers.map((p) => (
+                      <label className="target-row" key={`${g.key}:${p.id}`}>
+                        <input
+                          type="checkbox"
+                          checked={(definition[g.key] || []).includes(p.id)}
+                          onChange={() => toggle(g.key, p.id)}
+                        />
+                        <BotIcon size={18} />
+                        <div>
+                          <strong>{p.name}</strong>
+                          <p>{p.purpose || p.description || 'Published project agent'}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </Field>
+              ))}
+            </div>
+          );
+        })()}
       </ConfigSection>
       <ConfigSection
         label="Project knowledge"

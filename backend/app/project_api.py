@@ -22,7 +22,7 @@ from .models import (
 )
 from .schemas import ProjectIn, AgentIn
 from .security import builders, public_origin, token
-from .orchestration import project_snapshot, validate_agent
+from .orchestration import pin_agent_definition, project_snapshot, validate_agent
 from .runtime import enqueue, emit
 
 router = APIRouter(prefix="/api/v1")
@@ -705,13 +705,16 @@ def update_agent(
         body.definition.model_dump(),
     )
     db.commit()
-    return {"agent": agent_view(a), "errors": validate_agent(db, a.project_id, a.draft)}
+    return {
+        "agent": agent_view(a),
+        "errors": validate_agent(db, a.project_id, a.draft, agent_id=a.id),
+    }
 
 
 @router.post("/agents/{aid}/validate")
 def validate_agent_route(aid: str, user=Depends(builders), db: DB = Depends(session)):
     a = require(db, Agent, aid)
-    return {"errors": validate_agent(db, a.project_id, a.draft)}
+    return {"errors": validate_agent(db, a.project_id, a.draft, agent_id=a.id)}
 
 
 @router.delete("/agents/{aid}")
@@ -741,18 +744,21 @@ def delete_agent(aid: str, user=Depends(builders), db: DB = Depends(session)):
 
 
 def version_agent(db, a, testing=False):
-    errors = validate_agent(db, a.project_id, a.draft)
+    errors = validate_agent(db, a.project_id, a.draft, agent_id=a.id)
     if not testing and (not a.description.strip() or not a.purpose.strip()):
         errors.append("Agent description and purpose are required")
     if errors:
         raise HTTPException(422, errors)
-    definition = {
-        **a.draft,
-        "name": a.name,
-        "description": a.description,
-        "purpose": a.purpose,
-        "project_id": a.project_id,
-    }
+    definition = pin_agent_definition(
+        db,
+        {
+            **a.draft,
+            "name": a.name,
+            "description": a.description,
+            "purpose": a.purpose,
+            "project_id": a.project_id,
+        },
+    )
     v = AgentVersion(
         agent_id=a.id,
         number=sequence(db, AgentVersion, "agent_id", a.id, testing),

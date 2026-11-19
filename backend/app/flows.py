@@ -13,6 +13,7 @@ KINDS = {
     "knowledge",
     "ai",
     "agent",
+    "fanout",
     "handoff",
     "end",
 }
@@ -108,6 +109,7 @@ def validate_flow(flow, db=None, bot_id=None):
             "knowledge": ["collection_ids"],
             "ai": ["provider_id"],
             "agent": ["agent_id"],
+            "fanout": ["agent_ids"],
             "handoff": [],
             "end": [],
         }[kind]
@@ -140,19 +142,24 @@ def validate_flow(flow, db=None, bot_id=None):
             errors.append(f"{nid}: arguments must be an object")
         if cfg.get("queue_id") is not None and not isinstance(cfg["queue_id"], str):
             errors.append(f"{nid}: invalid queue_id")
-        for field in ("collection_ids", "tool_ids"):
+        for field in ("collection_ids", "tool_ids", "agent_ids"):
             if field in cfg and (
                 not isinstance(cfg[field], list)
                 or len(cfg[field]) > 8
                 or any(not isinstance(x, str) for x in cfg[field])
             ):
                 errors.append(f"{nid}: {field} must be a list of IDs")
+        if kind == "fanout":
+            if not cfg.get("agent_ids"):
+                errors.append(f"{nid}: select at least one agent")
+            if cfg.get("mode", "parallel") not in ("parallel", "sequential"):
+                errors.append(f"{nid}: mode must be parallel or sequential")
         branches = (
             ["true", "false"]
             if kind == "condition"
             else ([] if kind in ("end", "handoff") else ["next"])
         )
-        if kind in ("ai", "agent", "tool", "knowledge"):
+        if kind in ("ai", "agent", "fanout", "tool", "knowledge"):
             branches.append("error")
         for branch in branches:
             if (nid, branch) not in seen:
@@ -193,6 +200,22 @@ def validate_flow(flow, db=None, bot_id=None):
                 or not agent.published_id
             ):
                 errors.append(f"{nid}: select a published agent from this project")
+        if kind == "fanout":
+            bot = db.get(Bot, bot_id)
+            for aid in cfg.get("agent_ids", []):
+                agent = db.get(Agent, aid) if isinstance(aid, str) else None
+                if (
+                    not agent
+                    or not bot
+                    or agent.project_id != bot.project_id
+                    or not agent.published_id
+                ):
+                    errors.append(f"{nid}: select published agents from this project")
+                    break
+            if cfg.get("provider_id"):
+                p = db.get(Provider, cfg["provider_id"])
+                if p and p.purpose != "generation":
+                    errors.append(f"{nid}: generation provider required")
         if kind == "ai" and cfg.get("provider_id"):
             p = db.get(Provider, cfg["provider_id"])
             if p:

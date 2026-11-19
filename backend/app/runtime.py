@@ -23,7 +23,7 @@ from .flows import next_node, render
 from .knowledge import retrieve
 from . import providers
 from .tools import call_tool
-from .agent_execution import run_agent
+from .agent_execution import run_agent, run_fanout
 from .orchestration import route
 
 MAX_STEPS = 200
@@ -264,6 +264,10 @@ def compute(data):
                     raise ValueError("agent_version_missing")
                 cfg = version.definition
         return run_agent(
+            data, cfg, lambda text: stream_chunk(data, text), tool_executor=call_tool
+        )
+    elif kind == "fanout":
+        return run_fanout(
             data, cfg, lambda text: stream_chunk(data, text), tool_executor=call_tool
         )
 

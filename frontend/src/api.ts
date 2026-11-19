@@ -133,6 +133,9 @@ export type AgentDefinition = {
   instructions: string;
   tool_ids: string[];
   collection_ids: string[];
+  sub_agent_ids?: string[];
+  delegate_agent_ids?: string[];
+  parallel_agent_ids?: string[];
   max_iterations: number;
   output_schema?: Record<string, unknown> | null;
 };

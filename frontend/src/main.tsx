@@ -85,6 +85,7 @@ const icons = {
   knowledge: BookOpen,
   ai: BotIcon,
   agent: BotIcon,
+  fanout: Layers,
   handoff: Headphones,
   end: Check,
 };
@@ -97,6 +98,7 @@ const labels: Record<string, string> = {
   knowledge: 'Search knowledge',
   ai: 'Mini agent',
   agent: 'Agent',
+  fanout: 'Fan-out',
   handoff: 'Human handoff',
   end: 'End conversation',
 };
@@ -975,7 +977,9 @@ type CanvasNode = Node<CanvasData, 'workflow'>;
 function outputBranches(kind: string) {
   if (kind === 'condition') return ['true', 'false'];
   if (['end', 'handoff'].includes(kind)) return [];
-  return ['ai', 'agent', 'knowledge', 'tool'].includes(kind) ? ['next', 'error'] : ['next'];
+  return ['ai', 'agent', 'fanout', 'knowledge', 'tool'].includes(kind)
+    ? ['next', 'error']
+    : ['next'];
 }
 function normalizeVerticalFlow(flow: Flow): Flow {
   if (
@@ -1184,6 +1188,13 @@ function Builder({
         tool_ids: [],
       },
       agent: { agent_id: fullAgents?.find((a) => a.published_id)?.id || '' },
+      fanout: {
+        agent_ids: [],
+        mode: 'parallel',
+        provider_id: '',
+        instructions: 'Synthesize the specialist agent responses into a clear final answer.',
+        variable: 'fanout_result',
+      },
       tool: { tool_id: tools?.[0]?.id || '', arguments: {}, variable: 'tool_result' },
       knowledge: { collection_ids: [], query: '${question}', variable: 'knowledge' },
       handoff: { queue_id: queues[0]?.id },
@@ -1438,6 +1449,81 @@ function Builder({
                       ))}
                   </select>
                 </Field>
+              )}
+              {node.type === 'fanout' && (
+                <>
+                  <Field label="Execution mode">
+                    <select
+                      value={String(node.config.mode || 'parallel')}
+                      onChange={(e) => cfg('mode', e.target.value)}
+                    >
+                      <option value="parallel">Parallel (ADK ParallelAgent)</option>
+                      <option value="sequential">Sequential (ADK SequentialAgent)</option>
+                    </select>
+                  </Field>
+                  <Field
+                    label="Published full agents"
+                    hint="Select 1–8 published agents from this project to run together."
+                  >
+                    <div className="check-list">
+                      {fullAgents
+                        ?.filter((a) => a.published_id)
+                        .map((a) => {
+                          const selectedIds = (node.config.agent_ids || []) as string[];
+                          return (
+                            <label key={a.id}>
+                              <input
+                                type="checkbox"
+                                checked={selectedIds.includes(a.id)}
+                                onChange={() =>
+                                  cfg(
+                                    'agent_ids',
+                                    selectedIds.includes(a.id)
+                                      ? selectedIds.filter((x) => x !== a.id)
+                                      : [...selectedIds, a.id],
+                                  )
+                                }
+                              />
+                              <span>{a.name}</span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                  </Field>
+                  <Field
+                    label="Synthesizer model (optional)"
+                    hint="Leave empty to join agent outputs directly."
+                  >
+                    <select
+                      value={String(node.config.provider_id || '')}
+                      onChange={(e) => cfg('provider_id', e.target.value)}
+                    >
+                      <option value="">None (return combined outputs)</option>
+                      {providers
+                        .filter((p) => p.purpose === 'generation')
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} · {p.model}
+                          </option>
+                        ))}
+                    </select>
+                  </Field>
+                  {Boolean(node.config.provider_id) && (
+                    <Field label="Synthesizer instructions">
+                      <textarea
+                        rows={4}
+                        value={String(node.config.instructions || '')}
+                        onChange={(e) => cfg('instructions', e.target.value)}
+                      />
+                    </Field>
+                  )}
+                  <Field label="Store result in variable">
+                    <input
+                      value={String(node.config.variable || 'fanout_result')}
+                      onChange={(e) => cfg('variable', e.target.value)}
+                    />
+                  </Field>
+                </>
               )}
               {node.type === 'ai' && (
                 <>

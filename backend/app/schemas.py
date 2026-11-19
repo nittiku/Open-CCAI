@@ -123,6 +123,9 @@ class AgentDefinition(BaseModel):
     instructions: str = Field(default="", max_length=20000)
     tool_ids: list[str] = Field(default_factory=list, max_length=8)
     collection_ids: list[str] = Field(default_factory=list, max_length=8)
+    sub_agent_ids: list[str] = Field(default_factory=list, max_length=8)
+    delegate_agent_ids: list[str] = Field(default_factory=list, max_length=8)
+    parallel_agent_ids: list[str] = Field(default_factory=list, max_length=8)
     max_iterations: int = Field(default=8, ge=1, le=16)
     output_schema: dict | None = None
 

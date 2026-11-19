@@ -80,7 +80,7 @@ try {
     python,
     [
       '-c',
-      "import importlib.util,sys;sys.exit(0 if all(importlib.util.find_spec(x) for x in ['fastapi','uvicorn','sqlalchemy','alembic','cryptography','pwdlib','jwt','httpx','multipart','jsonschema','pypdf','pgvector','celery','litellm','psycopg']) else 1)",
+      "import importlib.util,sys;sys.exit(0 if all(importlib.util.find_spec(x) for x in ['fastapi','uvicorn','sqlalchemy','alembic','cryptography','pwdlib','jwt','httpx','multipart','jsonschema','pypdf','pgvector','celery','litellm','psycopg','google.adk']) else 1)",
     ],
     { env: environment, stdio: 'ignore' },
   );
