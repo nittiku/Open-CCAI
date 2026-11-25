@@ -156,6 +156,13 @@ def route(data, on_chunk=None):
         "request": query,
         "__routing_message_id": data["input_id"],
     }
+    if snapshot.get("test_agentic_workflow"):
+        result["route"] = {
+            "target_type": "agent",
+            "version_id": None,
+            "target_id": "agentic",
+        }
+        return result
     if snapshot.get("test_agent_version_id"):
         result["route"] = {
             "target_type": "agent",

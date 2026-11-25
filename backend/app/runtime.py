@@ -23,7 +23,7 @@ from .flows import next_node, render
 from .knowledge import retrieve
 from . import providers
 from .tools import call_tool
-from .agent_execution import run_agent, run_fanout
+from .agent_execution import run_agent, run_agentic_topology, run_fanout
 from .orchestration import route
 
 MAX_STEPS = 200
@@ -258,6 +258,17 @@ def compute(data):
             result["variables"][cfg.get("variable", "knowledge")] = result["sources"]
     elif kind in ("ai", "agent"):
         if kind == "agent":
+            if (
+                not cfg.get("agent_version_id")
+                and data["project_snapshot"]
+                and data["project_snapshot"].get("test_agentic_workflow")
+            ):
+                return run_agentic_topology(
+                    data,
+                    data["project_snapshot"]["test_agentic_workflow"],
+                    lambda text: stream_chunk(data, text),
+                    tool_executor=call_tool,
+                )
             with Session() as db:
                 version = db.get(AgentVersion, cfg.get("agent_version_id"))
                 if not version:

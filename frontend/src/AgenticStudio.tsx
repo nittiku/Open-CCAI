@@ -20,6 +20,7 @@ import {
   GitBranch,
   Headphones,
   Layers,
+  MessageCircle,
   MoreHorizontal,
   Plus,
   Radio,
@@ -32,12 +33,15 @@ import {
 } from 'lucide-react';
 import {
   api,
+  post,
   type FullAgent,
   type Provider,
   type Queue,
+  type TestSession,
   type Tool,
 } from './api';
 import { Badge, Empty, Field, JsonField, Modal, useLoad, type Notice } from './ui';
+import { ConversationTest } from './conversation';
 
 export type AgenticNodeKind =
   | 'router_agent'
@@ -672,6 +676,8 @@ function AgenticCanvasBuilder({
   const [activeRelation, setActiveRelation] = useState<AgenticConnectionKind>('DELEGATE');
   const [dirty, setDirty] = useState(false);
   const [creatingModal, setCreatingModal] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [test, setTest] = useState<TestSession>();
   const [tools] = useLoad<Tool[]>(() => api('/tools'), [], notice);
 
   const selectedNode = draft.nodes.find((n) => n.id === selectedNodeId);
@@ -916,6 +922,29 @@ function AgenticCanvasBuilder({
           >
             <Save size={15} />
             Save
+          </button>
+          <button
+            className="secondary compact"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                onUpdate(draft);
+                setDirty(false);
+                setTest(
+                  await post<TestSession>(`/projects/${draft.project_id}/agentic/test`, {
+                    workflow: draft,
+                  }),
+                );
+              } catch (e) {
+                notice((e as Error).message, true);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <MessageCircle size={15} />
+            Test chat
           </button>
           <button
             className="primary compact"
@@ -1334,6 +1363,14 @@ function AgenticCanvasBuilder({
             setCreatingModal(false);
             onCreatedWorkflow(created);
           }}
+        />
+      )}
+      {test && (
+        <ConversationTest
+          title={`Test · ${draft.name}`}
+          session={test}
+          close={() => setTest(undefined)}
+          notice={notice}
         />
       )}
     </div>

@@ -178,3 +178,82 @@ def test_flow_fanout_node_runs_parallel_agents_and_pins_versions(
     h = history(admin, s)
     reply = h["messages"][-1]["content"]
     assert "One ready" in reply and "Two ready" in reply
+
+
+def test_agentic_topology_test_endpoint_runs_adk_graph(
+    admin, provider, drain, monkeypatch
+):
+    p = project(admin, provider)
+    workflow = {
+        "id": "wf-1",
+        "project_id": p["id"],
+        "name": "Support Mesh",
+        "entry": "router",
+        "nodes": [
+            {
+                "id": "router",
+                "type": "router_agent",
+                "name": "Router",
+                "position": {"x": 0, "y": 0},
+                "config": {
+                    "provider_id": provider["generation"]["id"],
+                    "instructions": "MESH ROUTER",
+                },
+            },
+            {
+                "id": "helper",
+                "type": "agent",
+                "name": "Helper",
+                "position": {"x": 200, "y": 0},
+                "config": {
+                    "provider_id": provider["generation"]["id"],
+                    "instructions": "MESH HELPER",
+                },
+            },
+        ],
+        "edges": [
+            {
+                "id": "e1",
+                "source": "router",
+                "target": "helper",
+                "relation": "DELEGATE",
+            }
+        ],
+    }
+
+    def generate(db, prov, messages, tools, on_chunk, **kwargs):
+        sys_prompt = messages[0]["content"]
+        if "MESH ROUTER" in sys_prompt:
+            if messages[-1]["role"] != "tool":
+                helper_tool = next(
+                    t["function"]["name"]
+                    for t in tools
+                    if t["function"]["name"].startswith("Helper_")
+                )
+                return Reply(
+                    calls=[
+                        {
+                            "id": "call_mesh",
+                            "type": "function",
+                            "function": {
+                                "name": helper_tool,
+                                "arguments": json.dumps({"request": "Check status"}),
+                            },
+                        }
+                    ]
+                )
+            return Reply(text="Mesh result: " + messages[-1]["content"])
+        if "MESH HELPER" in sys_prompt:
+            return Reply(text="Helper ready")
+        return Reply(text="Other")
+
+    monkeypatch.setattr(providers.adapter, "generate", generate)
+    r = admin.post(API + f"/projects/{p['id']}/agentic/test", json={"workflow": workflow})
+    assert r.status_code == 200, r.text
+    s = r.json()
+    s["headers"] = {"Authorization": "Bearer " + s["token"]}
+    drain()
+    message(admin, s, "Run mesh")
+    drain()
+    h = history(admin, s)
+    assert "Helper ready" in h["messages"][-1]["content"]

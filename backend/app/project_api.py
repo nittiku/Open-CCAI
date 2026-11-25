@@ -827,3 +827,40 @@ def test_agent(aid: str, user=Depends(builders), db: DB = Depends(session)):
     db.add(pv)
     db.flush()
     return open_project_conversation(db, p, pv, "test")
+
+
+@router.post("/projects/{pid}/agentic/test")
+def test_agentic_workflow(
+    pid: str, body: dict, user=Depends(builders), db: DB = Depends(session)
+):
+    p = db.scalar(select(Project).where(Project.id == pid).with_for_update())
+    if not p:
+        raise HTTPException(404, "Project not found")
+    workflow = body.get("workflow") if isinstance(body, dict) else None
+    if not isinstance(workflow, dict) or not workflow.get("nodes"):
+        raise HTTPException(422, "Agentic workflow requires at least one node")
+    entry_id = workflow.get("entry")
+    nodes = {n.get("id"): n for n in workflow.get("nodes", []) if isinstance(n, dict)}
+    if not entry_id or entry_id not in nodes:
+        raise HTTPException(422, "Select a valid entry agent before testing")
+    snapshot = {
+        "schema_version": 1,
+        "name": p.name,
+        "description": p.description,
+        "purpose": p.purpose,
+        "orchestrator": {
+            "welcome": f"Testing agentic topology: {workflow.get('name', 'Agentic flow')}. Send a message!",
+            "fallback_queue_id": p.orchestrator.get("fallback_queue_id"),
+        },
+        "flows": [],
+        "agents": [],
+        "test_agentic_workflow": workflow,
+    }
+    pv = ProjectVersion(
+        project_id=p.id,
+        number=sequence(db, ProjectVersion, "project_id", p.id, True),
+        snapshot=snapshot,
+    )
+    db.add(pv)
+    db.flush()
+    return open_project_conversation(db, p, pv, "test")

@@ -691,3 +691,119 @@ def run_fanout(data, cfg, on_chunk, tool_executor=call_tool):
         result["sources"] = all_sources
         result["text"] = final_text
         return result
+
+
+def _node_to_agent_cfg(db, node: dict[str, Any], default_provider_id: str | None) -> dict[str, Any]:
+    """Resolve an AgenticStudio node (optionally linked to a full Agent) into an agent cfg."""
+    ncfg = dict(node.get("config") or {})
+    aid = ncfg.get("agent_id")
+    if aid:
+        agent = db.get(Agent, aid)
+        if agent:
+            if agent.published_id:
+                ver = db.get(AgentVersion, agent.published_id)
+                if ver:
+                    return {**ver.definition, "name": agent.name, "description": agent.description or agent.purpose}
+            return {**agent.draft, "name": agent.name, "description": agent.description or agent.purpose, "project_id": agent.project_id}
+    return {
+        "name": node.get("name") or node.get("type") or "agent",
+        "description": ncfg.get("criteria") or ncfg.get("strategy") or node.get("type") or "",
+        "provider_id": ncfg.get("provider_id") or default_provider_id,
+        "instructions": ncfg.get("instructions") or f"You are {node.get('name', 'an agent')}.",
+        "tool_ids": ncfg.get("tool_ids") or [],
+        "collection_ids": ncfg.get("collection_ids") or [],
+        "max_iterations": ncfg.get("max_iterations") or 4,
+    }
+
+
+def run_agentic_topology(data, workflow, on_chunk, tool_executor=call_tool):
+    """Execute an AgenticStudio multi-agent topology using Google ADK."""
+    variables = data["variables"]
+    result = {"branch": "next", "variables": {}, "sources": [], "usage": []}
+    with Session() as db:
+        query = str(render(variables.get("question", "${question}"), variables))
+        deadline = time.monotonic() + 75
+        call_counter = [0]
+        all_sources: list[dict[str, Any]] = []
+
+        nodes = {n["id"]: n for n in workflow.get("nodes", []) if isinstance(n, dict) and n.get("id")}
+        edges = [e for e in workflow.get("edges", []) if isinstance(e, dict)]
+        entry_id = workflow.get("entry")
+        if not entry_id or entry_id not in nodes:
+            raise ValueError("agentic_entry_missing")
+
+        default_provider_id = (nodes[entry_id].get("config") or {}).get("provider_id")
+        if not default_provider_id:
+            for n in nodes.values():
+                pid = (n.get("config") or {}).get("provider_id")
+                if pid:
+                    default_provider_id = pid
+                    break
+        if not default_provider_id:
+            gen = db.scalar(select(Provider).where(Provider.purpose == "generation"))
+            default_provider_id = gen.id if gen else None
+
+        visited: set[str] = set()
+
+        def build_node_agent(nid: str, *, is_root: bool = False) -> Any:
+            node = nodes[nid]
+            visited.add(nid)
+            outgoing = [e for e in edges if e.get("source") == nid and e.get("target") in nodes]
+
+            def _rel(edge: dict[str, Any]) -> str:
+                return str(edge.get("relation", "")).lower().replace("-", "").replace("/", "")
+
+            fanout_targets = [e["target"] for e in outgoing if _rel(e) == "fanout" and e["target"] not in visited]
+            handoff_targets = [e["target"] for e in outgoing if _rel(e) in ("handoff", "pubsub") and e["target"] not in visited]
+            delegate_targets = [e["target"] for e in outgoing if _rel(e) in ("delegate", "reflection") and e["target"] not in visited]
+
+            cfg = _node_to_agent_cfg(db, node, default_provider_id)
+            safe = _safe_name(f"{node.get('name', 'agent')}_{nid[:6]}", "agent")
+
+            sub_agents: list[Any] = [build_node_agent(tid) for tid in handoff_targets]
+            extra_tools: list[BaseTool] = []
+            for tid in delegate_targets:
+                target_agent = build_node_agent(tid)
+                extra_tools.append(AgentTool(agent=target_agent))
+
+            llm_agent = _build_llm_agent(
+                db,
+                cfg,
+                name=safe,
+                data=data,
+                query=query,
+                deadline=deadline,
+                call_counter=call_counter,
+                on_chunk=on_chunk if is_root and not fanout_targets else (lambda _: None),
+                tool_executor=tool_executor,
+                all_sources=all_sources,
+                include_composition=False,
+            )
+            if extra_tools:
+                llm_agent.tools = list(llm_agent.tools or []) + extra_tools
+            if sub_agents:
+                llm_agent.sub_agents = sub_agents
+
+            if fanout_targets:
+                workers = [build_node_agent(tid) for tid in fanout_targets]
+                parallel = ParallelAgent(name=_safe_name(f"fanout_{nid[:6]}", "fanout"), sub_agents=workers)
+                if is_root:
+                    return SequentialAgent(name="agentic_fanout_pipeline", sub_agents=[parallel, llm_agent])
+                return parallel
+            return llm_agent
+
+        root_agent = build_node_agent(entry_id, is_root=True)
+        max_calls = 4 * max(1, len(nodes))
+        final_text, _ = asyncio.run(
+            _run_adk_root(
+                root_agent=root_agent,
+                history_messages=data["messages"],
+                query=query,
+                max_llm_calls=max_calls,
+                root_name=_safe_name(nodes[entry_id].get("name", "agentic_root"), "agentic_root"),
+            )
+        )
+        result["sources"] = all_sources
+        result["text"] = final_text
+        result["variables"]["answer"] = final_text
+        return result
